@@ -1,0 +1,139 @@
+# ============================================================
+# Feedback Analyser — GitHub Actions CI/CD Pipeline
+# File: .github/workflows/ci.yml
+# Runs on every push and pull request to main
+# ============================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+  # ── Job 1: Run Tests ───────────────────────────────────────
+  test:
+    name: Run Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests.py -v --tb=short --cov=main --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ── Job 2: Lint Check ──────────────────────────────────────
+  lint:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install lint tools
+        run: |
+          pip install flake8
+
+      - name: Run flake8
+        run: |
+          flake8 main.py api.py database.py --max-line-length=120 --ignore=E501,W503,E302,E303 --count
+
+  # ── Job 3: Docker Build ────────────────────────────────────
+  docker:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t feedback-analyser:test .
+
+      - name: Test Docker container starts
+        run: |
+          docker run -d --name test-container -p 8501:8501 feedback-analyser:test
+          sleep 10
+          docker ps | grep test-container
+          docker stop test-container
+          docker rm test-container
+
+  # ── Job 4: Deploy (on push to main only) ──────────────────
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [ test, docker ]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        continue-on-error: true
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false   # Set to true when Docker Hub credentials are configured
+          tags: |
+            feedbackanalyser/app:latest
+            feedbackanalyser/app:${{ github.sha }}
+        continue-on-error: true
+
+      - name: Deployment summary
+        run: |
+          echo "================================================"
+          echo "  Feedback Analyser — Deployment Summary"
+          echo "================================================"
+          echo "  Branch:  ${{ github.ref_name }}"
+          echo "  Commit:  ${{ github.sha }}"
+          echo "  Status:  Tests passed, Docker built"
+          echo "  Time:    $(date)"
+          echo "================================================"
