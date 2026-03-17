@@ -324,10 +324,6 @@ MIT License — free to use, modify, and distribute.
 *Built for HiDevs AI Systems & Engineering — Day 20 Capstone Project*  
 *Author: Sarika Jivrajika | March 2026*
 
----
-
-## Key Features
-
 | Feature | Description |
 |---|---|
 | Multi-source ingestion | Google Play, App Store, CSV, Email |

@@ -422,23 +422,33 @@ def calculate_daily_sentiment(df: pd.DataFrame) -> pd.DataFrame:
 
 def calculate_week_over_week(daily_df: pd.DataFrame) -> dict:
     """Return week-over-week sentiment change stats."""
-    if daily_df.empty or len(daily_df) < 14:
-        return {"change": 0, "direction": "stable", "message": "Not enough data for WoW comparison"}
+    if daily_df.empty:
+        return {"change": 0, "direction": "stable", "message": "No data available"}
 
-    daily_df  = daily_df.sort_values("date")
-    last_7    = daily_df.tail(7)["avg_sentiment"].mean()
-    prev_7    = daily_df.iloc[-14:-7]["avg_sentiment"].mean()
-    change    = ((last_7 - prev_7) / max(abs(prev_7), 1e-9)) * 100
+    daily_df = daily_df.sort_values("date")
+    n        = len(daily_df)
+
+    # Need at least 2 days to compare
+    if n < 2:
+        return {"change": 0, "direction": "stable", "message": "Need more data for trend comparison"}
+
+    # Split available data in half for comparison
+    half     = max(1, n // 2)
+    last_half = daily_df.tail(half)["avg_sentiment"].mean()
+    prev_half = daily_df.iloc[:half]["avg_sentiment"].mean()
+    change    = ((last_half - prev_half) / max(abs(prev_half), 1e-9)) * 100
+
+    period = "week" if n >= 14 else f"{half}-day period"
 
     if change > 10:
         direction = "improving"
-        message   = f"😊 Sentiment improving by {change:.1f}% vs last week"
+        message   = f"Sentiment improving by {change:.1f}% vs previous {period}"
     elif change < -10:
         direction = "declining"
-        message   = f"⚠️ Sentiment declining by {abs(change):.1f}% vs last week"
+        message   = f"Sentiment declining by {abs(change):.1f}% vs previous {period}"
     else:
         direction = "stable"
-        message   = f"➡️ Sentiment stable (±{abs(change):.1f}% vs last week)"
+        message   = f"Sentiment stable (+-{abs(change):.1f}% vs previous {period})"
 
     return {"change": round(change, 2), "direction": direction, "message": message}
 
@@ -1677,10 +1687,7 @@ def main():
         st.subheader("🤖 AI Insights (Groq)")
         # ── Hardcoded Groq API Key ──────────────────────────
         # Get free key at https://console.groq.com
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-        GROQ_API_KEY_DEFAULT = os.getenv("GROQ_API_KEY", "")  # ← PASTE YOUR KEY HERE
+        GROQ_API_KEY_DEFAULT = "your_groq_api_key_here"   # ← PASTE YOUR KEY HERE
         groq_api_key = st.text_input(
             "Groq API Key",
             value=GROQ_API_KEY_DEFAULT,
@@ -1954,41 +1961,48 @@ def main():
     with tab2:
         st.subheader("📈 Trend Analysis")
 
-        if filtered_daily.empty:
+        # Use full daily_df for WoW — not filtered (filtered may be too short)
+        trend_daily = daily_df if not daily_df.empty else filtered_daily
+        trend_wow   = calculate_week_over_week(trend_daily)
+        trend_spikes = detect_spikes(trend_daily)
+
+        if trend_daily.empty:
             st.info("Not enough data to display trends.")
         else:
-            if wow:
+            if trend_wow:
                 icon_map = {"improving": "🟢", "declining": "🔴", "stable": "🟡"}
-                st.info(f"{icon_map.get(wow.get('direction','stable'), '➡️')} {wow.get('message','')}")
+                st.info(f"{icon_map.get(trend_wow.get('direction','stable'), '➡️')} {trend_wow.get('message','')}")
 
-            if spikes:
-                st.error(f"⚠️ {len(spikes)} sentiment spike(s) detected!")
-                for sp in spikes:
+            if trend_spikes:
+                st.error(f"⚠️ {len(trend_spikes)} sentiment spike(s) detected!")
+                for sp in trend_spikes:
                     st.warning(
                         f"📅 {sp['date']}: {sp['negative_count']} negative reviews "
                         f"(Z-score: {sp['z_score']})"
                     )
 
-            st.plotly_chart(chart_sentiment_trend(filtered_daily),  use_container_width=True, key="trends_sentiment")
-            st.plotly_chart(chart_volume_over_time(filtered_daily), use_container_width=True, key="trends_volume")
+            st.plotly_chart(chart_sentiment_trend(trend_daily),  use_container_width=True, key="trends_sentiment")
+            st.plotly_chart(chart_volume_over_time(trend_daily), use_container_width=True, key="trends_volume")
 
             st.subheader("📅 Weekly Breakdown")
-            if "week" in filtered_df.columns:
+            if "week" in df.columns:
                 weekly = (
-                    filtered_df.groupby("week")
+                    df.groupby("week")
                     .agg(
-                        total    = ("review_id",       "count"),
-                        avg_rating = ("rating",         "mean"),
-                        positive = ("sentiment_label", lambda x: (x == "positive").sum()),
-                        negative = ("sentiment_label", lambda x: (x == "negative").sum()),
+                        total      = ("review_id",       "count"),
+                        avg_rating = ("rating",          "mean"),
+                        positive   = ("sentiment_label", lambda x: (x == "positive").sum()),
+                        negative   = ("sentiment_label", lambda x: (x == "negative").sum()),
                     )
                     .reset_index()
                 )
                 weekly["avg_rating"] = weekly["avg_rating"].round(2)
                 weekly["pos_pct"]    = (weekly["positive"] / weekly["total"] * 100).round(1).astype(str) + "%"
                 weekly["neg_pct"]    = (weekly["negative"] / weekly["total"] * 100).round(1).astype(str) + "%"
-                st.dataframe(weekly[["week", "total", "avg_rating", "pos_pct", "neg_pct"]],
-                             use_container_width=True)
+                st.dataframe(
+                    weekly[["week", "total", "avg_rating", "pos_pct", "neg_pct"]],
+                    use_container_width=True,
+                )
 
     # ════════════════════════════════════════════════════════
     # TAB 3 — PREDICTIONS (BONUS)
@@ -2475,4 +2489,3 @@ def main():
 # ── ENTRY POINT ──────────────────────────────────────────────
 if __name__ == "__main__":
     main()
-
