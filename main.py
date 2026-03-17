@@ -18,6 +18,9 @@ import traceback
 from io import BytesIO
 from collections import Counter
 
+from dotenv import load_dotenv
+load_dotenv()  # ← loads .env file at startup
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -1685,9 +1688,8 @@ def main():
 
         st.divider()
         st.subheader("🤖 AI Insights (Groq)")
-        # ── Hardcoded Groq API Key ──────────────────────────
-        # Get free key at https://console.groq.com
-        GROQ_API_KEY_DEFAULT = "your_groq_api_key_here"   # ← PASTE YOUR KEY HERE
+        # Loads automatically from .env file
+        GROQ_API_KEY_DEFAULT = os.getenv("GROQ_API_KEY", "")
         groq_api_key = st.text_input(
             "Groq API Key",
             value=GROQ_API_KEY_DEFAULT,
