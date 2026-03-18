@@ -1,1 +1,2 @@
-echo -e "gcc\ng++" 
+gcc
+g++
